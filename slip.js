@@ -105,21 +105,7 @@
 window['Slip'] = (function(){
     'use strict';
 
-    var accessibility = {
-        // Set values to false if you don't want Slip to manage them
-        container: {
-            ariaRole: "listbox",
-            tabIndex: 0,
-            focus: false, // focuses after drop
-        },
-        items: {
-            ariaRole: "option", // If "option" flattens items, try "group": https://www.marcozehe.de/2013/03/08/sometimes-you-have-to-use-illegal-wai-aria-to-make-stuff-work/
-            tabIndex: -1, // 0 will make every item tabbable, which isn't always useful
-            focus: false, // focuses when dragging
-        },
-    };
-
-    var damnYouChrome = /Chrome\/[3-5]/.test(navigator.userAgent); // For bugs that can't be programmatically detected :( Intended to catch all versions of Chrome 30-40
+    var damnYouChrome = /Chrome\/[34]/.test(navigator.userAgent); // For bugs that can't be programmatically detected :( Intended to catch all versions of Chrome 30-40
     var needsBodyHandlerHack = damnYouChrome; // Otherwise I _sometimes_ don't get any touchstart events and only clicks instead.
 
     /* When dragging elements down in Chrome (tested 34-37) dragged element may appear below stationary elements.
@@ -127,17 +113,17 @@ window['Slip'] = (function(){
     var compositorDoesNotOrderLayers = damnYouChrome;
 
     // -webkit-mess
-    var testElementStyle = document.createElement('div').style;
+    var testElement = document.createElement('div');
 
-    var transitionJSPropertyName = "transition" in testElementStyle ? "transition" : "webkitTransition";
-    var transformJSPropertyName = "transform" in testElementStyle ? "transform" : "webkitTransform";
-    var transformCSSPropertyName = transformJSPropertyName === "webkitTransform" ? "-webkit-transform" : "transform";
-    var userSelectJSPropertyName = "userSelect" in testElementStyle ? "userSelect" : "webkitUserSelect";
+    var transitionPrefix = "webkitTransition" in testElement.style ? "webkitTransition" : "transition";
+    var transformPrefix = "webkitTransform" in testElement.style ? "webkitTransform" : "transform";
+    var transformProperty = transformPrefix === "webkitTransform" ? "-webkit-transform" : "transform";
+    var userSelectPrefix = "webkitUserSelect" in testElement.style ? "webkitUserSelect" : "userSelect";
 
-    testElementStyle[transformJSPropertyName] = 'translateZ(0)';
-    var hwLayerMagicStyle = testElementStyle[transformJSPropertyName] ? 'translateZ(0) ' : '';
-    var hwTopLayerMagicStyle = testElementStyle[transformJSPropertyName] ? 'translateZ(1px) ' : '';
-    testElementStyle = null;
+    testElement.style[transformPrefix] = 'translateZ(0)';
+    var hwLayerMagic = testElement.style[transformPrefix] ? 'translateZ(0) ' : '';
+    var hwTopLayerMagic = testElement.style[transformPrefix] ? 'translateZ(1px) ' : '';
+    testElement = null;
 
     var globalInstances = 0;
     var attachedBodyHandlerHack = false;
@@ -149,10 +135,7 @@ window['Slip'] = (function(){
 
         if (!this || this === window) return new Slip(container, options);
 
-        this.options = options = options || {};
-        this.options.keepSwipingPercent = options.keepSwipingPercent || 0;
-        this.options.minimumSwipeVelocity = options.minimumSwipeVelocity || 1;
-        this.options.minimumSwipeTime = options.minimumSwipeTime || 110;
+        this.options = options;
 
         // Functions used for as event handlers need usable `this` and must not change to be removable
         this.cancel = this.setState.bind(this, this.states.idle);
@@ -164,14 +147,13 @@ window['Slip'] = (function(){
         this.onMouseUp = this.onMouseUp.bind(this);
         this.onMouseLeave = this.onMouseLeave.bind(this);
         this.onSelection = this.onSelection.bind(this);
-        this.onContainerFocus = this.onContainerFocus.bind(this);
 
         this.setState(this.states.idle);
         this.attach(container);
     }
 
     function getTransform(node) {
-        var transform = node.style[transformJSPropertyName];
+        var transform = node.style[transformPrefix];
         if (transform) {
             return {
                 value:transform,
@@ -180,7 +162,7 @@ window['Slip'] = (function(){
         }
 
         if (window.getComputedStyle) {
-            var style = window.getComputedStyle(node).getPropertyValue(transformCSSPropertyName);
+            var style = window.getComputedStyle(node).getPropertyValue(transformProperty);
             if (style && style !== 'none') return {value:style, original:''};
         }
         return {value:'', original:''};
@@ -222,12 +204,9 @@ window['Slip'] = (function(){
 
         states: {
             idle: function idleStateInit() {
-                this.removeMouseHandlers();
-                if (this.target) {
-                    this.target.node.style.willChange = '';
-                    this.target = null;
-                }
+                this.target = null;
                 this.usingTouch = false;
+                this.removeMouseHandlers();
 
                 return {
                     allowTextSelection: true,
@@ -236,8 +215,7 @@ window['Slip'] = (function(){
 
             undecided: function undecidedStateInit() {
                 this.target.height = this.target.node.offsetHeight;
-                this.target.node.style.willChange = transformCSSPropertyName;
-                this.target.node.style[transitionJSPropertyName] = '';
+                this.target.node.style[transitionPrefix] = '';
 
                 if (!this.dispatch(this.target.originalTarget, 'beforewait')) {
                   if (this.dispatch(this.target.originalTarget, 'beforereorder')) {
@@ -263,7 +241,7 @@ window['Slip'] = (function(){
                         var move = this.getAbsoluteMovement();
 
                         if (move.x > 20 && move.y < Math.max(100, this.target.height)) {
-                            if (this.dispatch(this.target.originalTarget, 'beforeswipe', {directionX: move.directionX, directionY: move.directionY})) {
+                            if (this.dispatch(this.target.originalTarget, 'beforeswipe')) {
                                 this.setState(this.states.swipe);
                                 return false;
                             } else {
@@ -307,8 +285,8 @@ window['Slip'] = (function(){
                     leaveState: function() {
                         if (swipeSuccess) {
                             this.animateSwipe(function(target){
-                                target.node.style[transformJSPropertyName] = target.baseTransform.original;
-                                target.node.style[transitionJSPropertyName] = '';
+                                target.node.style[transformPrefix] = target.baseTransform.original;
+                                target.node.style[transitionPrefix] = '';
                                 if (this.dispatch(target.node, 'afterswipe')) {
                                     removeClass();
                                     return true;
@@ -326,7 +304,7 @@ window['Slip'] = (function(){
                         var move = this.getTotalMovement();
 
                         if (Math.abs(move.y) < this.target.height+20) {
-                            this.target.node.style[transformJSPropertyName] = 'translate(' + move.x + 'px,0) ' + hwLayerMagicStyle + this.target.baseTransform.value;
+                            this.target.node.style[transformPrefix] = 'translate(' + move.x + 'px,0) ' + hwLayerMagic + this.target.baseTransform.value;
                             return false;
                         } else {
                             this.setState(this.states.idle);
@@ -338,16 +316,22 @@ window['Slip'] = (function(){
                     },
 
                     onEnd: function() {
+                        var dx = this.latestPosition.x - this.previousPosition.x;
+                        var dy = this.latestPosition.y - this.previousPosition.y;
+                        var velocity = Math.sqrt(dx*dx + dy*dy) / (this.latestPosition.time - this.previousPosition.time + 1);
+
                         var move = this.getAbsoluteMovement();
-                        var velocity = move.x / move.time;
+                        var swiped = velocity > 0.6 && move.time > 110;
 
-                        // How far out has the item been swiped?
-                        var swipedPercent = Math.abs((this.startPosition.x - this.previousPosition.x) / this.container.clientWidth) * 100;
-
-                        var swiped = (velocity > this.options.minimumSwipeVelocity && move.time > this.options.minimumSwipeTime) || (this.options.keepSwipingPercent && swipedPercent > this.options.keepSwipingPercent);
+						var direction;
+						if (dx > 0) {
+							direction = "right";
+						} else {
+							direction = "left";
+						}
 
                         if (swiped) {
-                            if (this.dispatch(this.target.node, 'swipe', {direction: move.directionX, originalIndex: originalIndex})) {
+                            if (this.dispatch(this.target.node, 'swipe', {direction: direction, originalIndex: originalIndex})) {
                                 swipeSuccess = true; // can't animate here, leaveState overrides anim
                             }
                         }
@@ -358,10 +342,6 @@ window['Slip'] = (function(){
             },
 
             reorder: function reorderStateInit() {
-                if (this.target.node.focus && accessibility.items.focus) {
-                    this.target.node.focus();
-                }
-
                 this.target.height = this.target.node.offsetHeight;
 
                 var nodes = this.container.childNodes;
@@ -372,7 +352,7 @@ window['Slip'] = (function(){
                 for(var i=0; i < nodes.length; i++) {
                     if (nodes[i].nodeType != 1 || nodes[i] === this.target.node) continue;
                     var t = nodes[i].offsetTop;
-                    nodes[i].style[transitionJSPropertyName] = transformCSSPropertyName + ' 0.2s ease-in-out';
+                    nodes[i].style[transitionPrefix] = transformProperty + ' 0.2s ease-in-out';
                     otherNodes.push({
                         node: nodes[i],
                         baseTransform: getTransform(nodes[i]),
@@ -382,7 +362,7 @@ window['Slip'] = (function(){
 
                 this.target.node.className += ' slip-reordering';
                 this.target.node.style.zIndex = '99999';
-                this.target.node.style[userSelectJSPropertyName] = 'none';
+                this.target.node.style[userSelectPrefix] = 'none';
                 if (compositorDoesNotOrderLayers) {
                     // Chrome's compositor doesn't sort 2D layers
                     this.container.style.webkitTransformStyle = 'preserve-3d';
@@ -397,7 +377,7 @@ window['Slip'] = (function(){
                     }
 
                     var move = this.getTotalMovement();
-                    this.target.node.style[transformJSPropertyName] = 'translate(0,' + move.y + 'px) ' + hwTopLayerMagicStyle + this.target.baseTransform.value;
+                    this.target.node.style[transformPrefix] = 'translate(0,' + move.y + 'px) ' + hwTopLayerMagic + this.target.baseTransform.value;
 
                     var height = this.target.height;
                     otherNodes.forEach(function(o){
@@ -409,7 +389,7 @@ window['Slip'] = (function(){
                             off = -height;
                         }
                         // FIXME: should change accelerated/non-accelerated state lazily
-                        o.node.style[transformJSPropertyName] = off ? 'translate(0,'+off+'px) ' + hwLayerMagicStyle + o.baseTransform.value : o.baseTransform.original;
+                        o.node.style[transformPrefix] = off ? 'translate(0,'+off+'px) ' + hwLayerMagic + o.baseTransform.value : o.baseTransform.original;
                     });
                     return false;
                 }
@@ -424,19 +404,15 @@ window['Slip'] = (function(){
                             this.container.style.webkitTransformStyle = '';
                         }
 
-                        if (this.container.focus && accessibility.container.focus) {
-                            this.container.focus();
-                        }
-
                         this.target.node.className = this.target.node.className.replace(/(?:^| )slip-reordering/,'');
-                        this.target.node.style[userSelectJSPropertyName] = '';
+                        this.target.node.style[userSelectPrefix] = '';
 
                         this.animateToZero(function(target){
                             target.node.style.zIndex = '';
                         });
                         otherNodes.forEach(function(o){
-                            o.node.style[transformJSPropertyName] = o.baseTransform.original;
-                            o.node.style[transitionJSPropertyName] = ''; // FIXME: animate to new position
+                            o.node.style[transformPrefix] = o.baseTransform.original;
+                            o.node.style[transitionPrefix] = ''; // FIXME: animate to new position
                         });
                     },
 
@@ -488,17 +464,6 @@ window['Slip'] = (function(){
             }
 
             this.container = container;
-
-            // Accessibility
-            if (false !== accessibility.container.tabIndex) {
-                this.container.tabIndex = accessibility.container.tabIndex;
-            }
-            if (accessibility.container.ariaRole) {
-                this.container.setAttribute('aria-role', accessibility.container.ariaRole);
-            }
-            this.setChildNodesAriaRoles();
-            this.container.addEventListener('focus', this.onContainerFocus, false);
-
             this.otherNodes = [];
 
             // selection on iOS interferes with reordering
@@ -553,39 +518,19 @@ window['Slip'] = (function(){
             return targetNode;
         },
 
-        onContainerFocus: function(e) {
-            e.stopPropagation();
-            
-            this.setChildNodesAriaRoles();
-        },
-
-        setChildNodesAriaRoles: function() {
-            var nodes = this.container.childNodes;
-            for(var i=0; i < nodes.length; i++) {
-                if (nodes[i].nodeType != 1) continue;
-                if (accessibility.items.ariaRole) {
-                    nodes[i].setAttribute('aria-role', accessibility.items.ariaRole);
-                }
-                if (false !== accessibility.items.tabIndex) {
-                    nodes[i].tabIndex = accessibility.items.tabIndex;
-                }
-            }
-        },
-
         onSelection: function(e) {
             e.stopPropagation();
-
+            
             var isRelated = e.target === document || this.findTargetNode(e);
-            var iOS = /(iPhone|iPad|iPod)/i.test(navigator.userAgent) && !/(Android|Windows)/i.test(navigator.userAgent);
             if (!isRelated) return;
 
-            if (iOS) {
-                // iOS doesn't allow selection to be prevented
-                this.setState(this.states.idle);
-            } else {
+            if (e.cancelable || e.defaultPrevented) {
                 if (!this.state.allowTextSelection) {
                     e.preventDefault();
                 }
+            } else {
+                // iOS doesn't allow selection to be prevented
+                this.setState(this.states.idle);
             }
         },
 
@@ -693,9 +638,8 @@ window['Slip'] = (function(){
         updatePosition: function(e, pos) {
             e.stopPropagation();
 
-            if (this.target == null) {
+            if(this.target == null)
                 return;
-            }
             this.latestPosition = pos;
 
             var triggerOffset = 40,
@@ -785,8 +729,6 @@ window['Slip'] = (function(){
                 x: Math.abs(this.latestPosition.x - this.startPosition.x),
                 y: Math.abs(this.latestPosition.y - this.startPosition.y),
                 time:this.latestPosition.time - this.startPosition.time,
-                directionX:this.latestPosition.x - this.startPosition.x < 0 ? 'left' : 'right',
-                directionY:this.latestPosition.y - this.startPosition.y < 0 ? 'up' : 'down',
             };
         },
 
@@ -819,11 +761,11 @@ window['Slip'] = (function(){
             // save, because this.target/container could change during animation
             target = target || this.target;
 
-            target.node.style[transitionJSPropertyName] = transformCSSPropertyName + ' 0.1s ease-out';
-            target.node.style[transformJSPropertyName] = 'translate(0,0) ' + hwLayerMagicStyle + target.baseTransform.value;
+            target.node.style[transitionPrefix] = transformProperty + ' 0.1s ease-out';
+            target.node.style[transformPrefix] = 'translate(0,0) ' + hwLayerMagic + target.baseTransform.value;
             setTimeout(function(){
-                target.node.style[transitionJSPropertyName] = '';
-                target.node.style[transformJSPropertyName] = target.baseTransform.original;
+                target.node.style[transitionPrefix] = '';
+                target.node.style[transformPrefix] = target.baseTransform.original;
                 if (callback) callback.call(this, target);
             }.bind(this), 101);
         },
@@ -831,27 +773,27 @@ window['Slip'] = (function(){
         animateSwipe: function(callback) {
             var target = this.target;
             var siblings = this.getSiblings(target);
-            var emptySpaceTransformStyle = 'translate(0,' + this.target.height + 'px) ' + hwLayerMagicStyle + ' ';
+            var emptySpaceTransform = 'translate(0,' + this.target.height + 'px) ' + hwLayerMagic + ' ';
 
             // FIXME: animate with real velocity
-            target.node.style[transitionJSPropertyName] = 'all 0.1s linear';
-            target.node.style[transformJSPropertyName] = ' translate(' + (this.getTotalMovement().x > 0 ? '' : '-') + '100%,0) ' + hwLayerMagicStyle + target.baseTransform.value;
+            target.node.style[transitionPrefix] = 'all 0.1s linear';
+            target.node.style[transformPrefix] = ' translate(' + (this.getTotalMovement().x > 0 ? '' : '-') + '100%,0) ' + hwLayerMagic + target.baseTransform.value;
 
             setTimeout(function(){
                 if (callback.call(this, target)) {
                     siblings.forEach(function(o){
-                        o.node.style[transitionJSPropertyName] = '';
-                        o.node.style[transformJSPropertyName] = emptySpaceTransformStyle + o.baseTransform.value;
+                        o.node.style[transitionPrefix] = '';
+                        o.node.style[transformPrefix] = emptySpaceTransform + o.baseTransform.value;
                     });
                     setTimeout(function(){
                         siblings.forEach(function(o){
-                            o.node.style[transitionJSPropertyName] = transformCSSPropertyName + ' 0.1s ease-in-out';
-                            o.node.style[transformJSPropertyName] = 'translate(0,0) ' + hwLayerMagicStyle + o.baseTransform.value;
+                            o.node.style[transitionPrefix] = transformProperty + ' 0.1s ease-in-out';
+                            o.node.style[transformPrefix] = 'translate(0,0) ' + hwLayerMagic + o.baseTransform.value;
                         });
                         setTimeout(function(){
                             siblings.forEach(function(o){
-                                o.node.style[transitionJSPropertyName] = '';
-                                o.node.style[transformJSPropertyName] = o.baseTransform.original;
+                                o.node.style[transitionPrefix] = '';
+                                o.node.style[transformPrefix] = o.baseTransform.original;
                             });
                         },101);
                     }, 1);
